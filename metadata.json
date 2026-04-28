@@ -1,0 +1,5 @@
+{
+  "name": "LLMoon智能交易管家",
+  "description": "基于大模型与技术指标的智能股票分析与交易建议工具，支持实时行情可视化、持仓管理及个性化交易原则。",
+  "requestFramePermissions": []
+}

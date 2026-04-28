@@ -1,0 +1,40 @@
+{
+  "entities": {
+    "userProfile": {
+      "title": "User Profile",
+      "description": "Stores user's trading preferences and principles.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "balance": { "type": "number", "description": "Cash balance" },
+        "tradingPrinciples": { "type": "string", "description": "Subjective trading preferences" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "balance"]
+    },
+    "holding": {
+      "title": "Stock Holding",
+      "description": "User's current stock positions.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "symbol": { "type": "string" },
+        "name": { "type": "string" },
+        "quantity": { "type": "number" },
+        "averagePrice": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "symbol", "quantity"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "userProfile",
+      "description": "User profile and settings"
+    },
+    "/users/{uid}/holdings/{holdingId}": {
+      "schema": "holding",
+      "description": "User's stock holdings"
+    }
+  }
+}
