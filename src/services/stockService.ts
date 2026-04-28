@@ -202,13 +202,13 @@ export function calculateHistoryIndicators(data: StockData[]): (TechnicalIndicat
       const last10 = data.slice(i - 9, i + 1);
       const h10 = Math.max(...last10.map(d => d.high));
       const l10 = Math.min(...last10.map(d => d.low));
-      wr10 = h10 === l10 ? 0 : ((h10 - closes[i]) / (h10 - l10)) * 100;
+      wr10 = Math.abs(h10 - l10) < 0.0001 ? 0 : ((h10 - closes[i]) / (h10 - l10)) * 100;
     }
     if (i >= 5) {
       const last6 = data.slice(i - 5, i + 1);
       const h6 = Math.max(...last6.map(d => d.high));
       const l6 = Math.min(...last6.map(d => d.low));
-      wr6 = h6 === l6 ? 0 : ((h6 - closes[i]) / (h6 - l6)) * 100;
+      wr6 = Math.abs(h6 - l6) < 0.0001 ? 0 : ((h6 - closes[i]) / (h6 - l6)) * 100;
     }
 
     // OBV
@@ -242,7 +242,7 @@ export function calculateHistoryIndicators(data: StockData[]): (TechnicalIndicat
 
     // Turnover Rate (换手率) - Estimated since we don't have total shares
     // In a real app, this would come from the API. Here we use a proxy: (volume / avgVolume) * volatility
-    const turnoverRate = (volumeRatio * (Math.abs(data[i].high - data[i].low) / data[i].close)) * 10;
+    const turnoverRate = (volumeRatio * (Math.abs(data[i].high - data[i].low) / (data[i].close || 1))) * 10;
 
     results.push({
       date: data[i].date,
@@ -253,12 +253,12 @@ export function calculateHistoryIndicators(data: StockData[]): (TechnicalIndicat
       boll: { upper, mid, lower },
       rsi: { rsi6: rsi6[i], rsi12: rsi12[i], rsi24: rsi24[i] },
       cci,
-      wr: { wr10: wr10[i], wr6: wr6[i] },
+      wr: { wr10, wr6 },
       obv: cumulativeOBV,
       vwap,
       atr,
       volumeRatio,
-      turnoverRate,
+      turnoverRate: isNaN(turnoverRate) ? 0 : turnoverRate,
       ma: { ma5: ma5[i], ma10: ma10[i], ma20: ma20[i], ma60: ma60[i], ma120: ma120[i] },
       ema: { ema20: ema20[i], ema60: ema60[i], ema120: ema120[i] },
       volume: volumes[i]

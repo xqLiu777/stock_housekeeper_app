@@ -67,7 +67,7 @@ import { ChatPanel } from './components/ChatPanel';
 import { ChartPanel } from './components/ChartPanel';
 import { PortfolioDashboard } from './components/PortfolioDashboard';
 
-console.log("App.tsx file executing...");
+
 
 class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasError: boolean, error: Error | null}> {
   constructor(props: {children: React.ReactNode}) {
@@ -425,9 +425,7 @@ function AppContent() {
   if (!user && !isGuest) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-slate-900 text-white p-4">
-        <div className="absolute top-4 left-4 bg-yellow-100/20 p-1 text-[10px] text-yellow-200 rounded">
-          Debug: Login Screen | Loading: {loading ? "Yes" : "No"}
-        </div>
+
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -486,9 +484,7 @@ function AppContent() {
 
   return (
     <div className="min-h-screen pb-20">
-      <div className="bg-yellow-100 p-1 text-[10px] text-center text-yellow-800">
-        Debug: AppContent Rendered | Page: {currentPage} | User: {user?.email}
-      </div>
+
       <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
         {isGuest && (
           <div className="bg-blue-600 text-white text-[10px] py-1 text-center font-bold">

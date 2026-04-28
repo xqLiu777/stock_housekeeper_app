@@ -21,9 +21,7 @@ interface Rule {
 }
 
 export const SimulationPage = () => {
-  useEffect(() => {
-    console.log("SimulationPage mounted");
-  }, []);
+
 
   const [symbol, setSymbol] = useState("600000");
   const [stockName, setStockName] = useState("浦发银行");
@@ -33,19 +31,30 @@ export const SimulationPage = () => {
   const [rules, setRules] = useState<Rule[]>([
     { 
       id: '1', 
-      name: '默认买入规则', 
+      name: '抄底买入', 
       action: 'BUY', 
       amount: 10000, 
       logic: 'AND', 
-      conditions: [{ indicator: 'K', operator: '>', value: 20 }] 
+      conditions: [{ indicator: 'J', operator: '<', value: 0 }] 
+    },
+    {
+      id: '2',
+      name: '止盈卖出',
+      action: 'SELL',
+      amount: 1000000, // 代表卖出全部
+      logic: 'AND',
+      conditions: [{ indicator: 'J', operator: '>', value: 100 }]
     }
   ]);
+  const [tradingFee, setTradingFee] = useState(0.0015); // 手续费+印花税 0.15%
   const [naturalLanguage, setNaturalLanguage] = useState("");
   const [isParsing, setIsParsing] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
   const [results, setResults] = useState<any>(null);
   const [chartData, setChartData] = useState<any[]>([]);
   const [tradePoints, setTradePoints] = useState<any[]>([]);
+  const [diagnosis, setDiagnosis] = useState("");
+  const [isDiagnosing, setIsDiagnosing] = useState(false);
 
   const addRule = () => {
     setRules([...rules, { 
@@ -90,18 +99,33 @@ export const SimulationPage = () => {
     if (!naturalLanguage.trim()) return;
     setIsParsing(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `将以下自然语言描述的股票交易规则解析为结构化JSON。
-        用户输入: "${naturalLanguage}"
-        
-        支持的指标: K, D, J, MACD_DIFF, MACD_DEA, MACD_BAR, RSI6, RSI12, RSI24, BOLL_UP, BOLL_MID, BOLL_LOW, CCI, WR10, WR6, OBV, VWAP, ATR, VOLUME_RATIO, TURNOVER_RATE, AVG_COST, CLOSE, OPEN, HIGH, LOW, VOLUME
-        支持的操作符: >, <, >=, <=, ==
-        支持的动作: BUY, SELL
-        支持的逻辑: AND, OR
-        
-        返回格式必须是 Rule 对象的数组。`,
+        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+        const response = await ai.models.generateContent({
+          model: "gemini-3-flash-preview",
+          contents: `你是一个顶级的量化策略工程师。请将用户的自然语言描述精确转化为交易规则。
+          用户输入: "${naturalLanguage}"
+          
+          指标库:
+          - K, D, J (KDJ)
+          - MACD_DIFF, MACD_DEA, MACD_BAR (MACD)
+          - RSI6, RSI12, RSI24
+          - BOLL_UP, BOLL_MID, BOLL_LOW
+          - CCI, WR10, WR6
+          - OBV, VWAP, ATR, VOLUME_RATIO, TURNOVER_RATE
+          - CLOSE (收盘价), AVG_COST (持仓均价), VOLUME (成交量)
+          
+          语法规范:
+          - operator: ">", "<", ">=", "<=", "=="
+          - action: "BUY" (买入), "SELL" (卖出)
+          - amount: 交易金额（元）。
+          - logic: "AND", "OR"
+          
+          特殊指令处理:
+          1. "全部卖出" 或 "清仓" -> amount 设置为 999999999
+          2. "半仓" -> 逻辑上目前不支持比例，请默认给出具体金额或 10000。
+          3. 如果用户提到"止损"，请使用 "CLOSE < AVG_COST * 0.95" (假设5%止损) 类似的条件。
+          
+          返回符合 TypeScript Interface Rule 的 JSON 数组。`,
         config: {
           responseMimeType: "application/json",
           responseSchema: {
@@ -203,6 +227,7 @@ export const SimulationPage = () => {
 
   const runSimulation = async () => {
     console.log("Starting simulation...");
+    setDiagnosis(""); // Reset diagnosis
     let currentData = chartData;
     
     if (currentData.length < 2) {
@@ -219,152 +244,155 @@ export const SimulationPage = () => {
     setResults(null); 
     setTradePoints([]); 
     
-    try {
-      if (!currentData || currentData.length === 0) {
-        throw new Error("没有可用的股票数据进行模拟");
-      }
+      try {
+        if (!currentData || currentData.length === 0) {
+          throw new Error("没有可用的股票数据进行模拟");
+        }
 
-      // Calculate all indicators for the history
-      const indicatorsHistory = calculateHistoryIndicators(currentData);
+        const indicatorsHistory = calculateHistoryIndicators(currentData);
+        const startPrice = currentData[0].close;
+        const endPrice = currentData[currentData.length - 1].close;
+        const buyAndHoldReturn = ((endPrice - startPrice) / startPrice) * 100;
+        const buyAndHoldValue = initialCapital * (1 + buyAndHoldReturn / 100);
 
-      const startPrice = currentData[0].close;
-      const endPrice = currentData[currentData.length - 1].close;
-      const buyAndHoldReturn = ((endPrice - startPrice) / startPrice) * 100;
-      const buyAndHoldValue = initialCapital * (1 + buyAndHoldReturn / 100);
+        let cash = initialCapital;
+        let shares = 0;
+        let totalCost = 0;
+        const trades = [];
+        let maxPortfolioValue = initialCapital;
+        let maxDrawdown = 0;
+        const portfolioHistory = [];
 
-      let cash = initialCapital;
-      let shares = 0;
-      let totalCost = 0;
-      const trades = [];
+        for (let i = 0; i < currentData.length; i++) {
+          const dayData = currentData[i];
+          const indicators = indicatorsHistory[i];
+          const avgCost = shares > 0 ? totalCost / shares : 0;
 
-      console.log(`Simulating with ${currentData.length} data points...`);
+          // 记录当前总资产用于计算回测曲线和回撤
+          const currentPortfolioValue = cash + (shares * dayData.close);
+          portfolioHistory.push(currentPortfolioValue);
+          if (currentPortfolioValue > maxPortfolioValue) maxPortfolioValue = currentPortfolioValue;
+          const currentDrawdown = (maxPortfolioValue - currentPortfolioValue) / maxPortfolioValue;
+          if (currentDrawdown > maxDrawdown) maxDrawdown = currentDrawdown;
 
-      for (let i = 0; i < currentData.length; i++) {
-        const dayData = currentData[i];
-        const indicators = indicatorsHistory[i];
-        const avgCost = shares > 0 ? totalCost / shares : 0;
+          const getValue = (name: string) => {
+            switch (name) {
+              case 'K': return indicators.kdj.k;
+              case 'D': return indicators.kdj.d;
+              case 'J': return indicators.kdj.j;
+              case 'MACD_DIFF': return indicators.macd.diff;
+              case 'MACD_DEA': return indicators.macd.dea;
+              case 'MACD_BAR': return indicators.macd.bar;
+              case 'RSI6': return indicators.rsi.rsi6;
+              case 'RSI12': return indicators.rsi.rsi12;
+              case 'RSI24': return indicators.rsi.rsi24;
+              case 'BOLL_UP': return indicators.boll.upper;
+              case 'BOLL_MID': return indicators.boll.mid;
+              case 'BOLL_LOW': return indicators.boll.lower;
+              case 'CCI': return indicators.cci;
+              case 'WR10': return indicators.wr.wr10;
+              case 'WR6': return indicators.wr.wr6;
+              case 'OBV': return indicators.obv;
+              case 'VWAP': return indicators.vwap;
+              case 'ATR': return indicators.atr;
+              case 'VOLUME_RATIO': return indicators.volumeRatio;
+              case 'TURNOVER_RATE': return indicators.turnoverRate;
+              case 'AVG_COST': return avgCost;
+              case 'CLOSE': return dayData.close;
+              default: return 0;
+            }
+          };
 
-        // Map indicator names to values
-        const getValue = (name: string) => {
-          switch (name) {
-            case 'K': return indicators.kdj.k;
-            case 'D': return indicators.kdj.d;
-            case 'J': return indicators.kdj.j;
-            case 'MACD_DIFF': return indicators.macd.diff;
-            case 'MACD_DEA': return indicators.macd.dea;
-            case 'MACD_BAR': return indicators.macd.bar;
-            case 'RSI6': return indicators.rsi.rsi6;
-            case 'RSI12': return indicators.rsi.rsi12;
-            case 'RSI24': return indicators.rsi.rsi24;
-            case 'BOLL_UP': return indicators.boll.upper;
-            case 'BOLL_MID': return indicators.boll.mid;
-            case 'BOLL_LOW': return indicators.boll.lower;
-            case 'CCI': return indicators.cci;
-            case 'WR10': return indicators.wr.wr10;
-            case 'WR6': return indicators.wr.wr6;
-            case 'OBV': return indicators.obv;
-            case 'VWAP': return indicators.vwap;
-            case 'ATR': return indicators.atr;
-            case 'VOLUME_RATIO': return indicators.volumeRatio;
-            case 'TURNOVER_RATE': return indicators.turnoverRate;
-            case 'AVG_COST': return avgCost;
-            case 'CLOSE': return dayData.close;
-            case 'OPEN': return dayData.open;
-            case 'HIGH': return dayData.high;
-            case 'LOW': return dayData.low;
-            case 'VOLUME': return dayData.volume;
-            default: return 0;
-          }
-        };
+          const evaluateCondition = (cond: Condition) => {
+            const val = getValue(cond.indicator);
+            switch (cond.operator) {
+              case '>': return val > cond.value;
+              case '<': return val < cond.value;
+              case '>=': return val >= cond.value;
+              case '<=': return val <= cond.value;
+              case '==': return val === cond.value;
+              default: return false;
+            }
+          };
 
-        const evaluateCondition = (cond: Condition) => {
-          const val = getValue(cond.indicator);
-          switch (cond.operator) {
-            case '>': return val > cond.value;
-            case '<': return val < cond.value;
-            case '>=': return val >= cond.value;
-            case '<=': return val <= cond.value;
-            case '==': return val === cond.value;
-            default: return false;
-          }
-        };
+          for (const rule of rules) {
+            const results = rule.conditions.map(evaluateCondition);
+            const isTriggered = rule.logic === 'AND' 
+              ? results.every(r => r) 
+              : results.some(r => r);
 
-        for (const rule of rules) {
-          const results = rule.conditions.map(evaluateCondition);
-          const isTriggered = rule.logic === 'AND' 
-            ? results.every(r => r) 
-            : results.some(r => r);
-
-          if (isTriggered) {
-            if (rule.action === 'BUY' && cash >= dayData.close) {
-              // 动态现金余额限制：买入金额不能超过当前可用现金
-              const actualBuyAmount = Math.min(rule.amount, cash);
-              const boughtShares = Math.floor(actualBuyAmount / dayData.close);
-              if (boughtShares > 0) {
-                const cost = boughtShares * dayData.close;
-                shares += boughtShares;
-                cash -= cost;
-                totalCost += cost;
-                trades.push({ 
-                  date: dayData.date, 
-                  price: dayData.close, 
-                  action: 'BUY', 
-                  amount: cost,
-                  shares: boughtShares
-                });
-                break; // 每天仅执行一次操作
-              }
-            } else if (rule.action === 'SELL' && shares > 0) {
-              // 卖出逻辑：将卖出所得资金回笼至现金余额
-              const sharesToSell = Math.min(shares, Math.floor(rule.amount / dayData.close));
-              
-              if (sharesToSell > 0) {
-                const sellProceeds = sharesToSell * dayData.close;
-                const costOfSoldShares = (totalCost / shares) * sharesToSell;
-                cash += sellProceeds;
-                shares -= sharesToSell;
-                totalCost -= costOfSoldShares;
-                trades.push({ 
-                  date: dayData.date, 
-                  price: dayData.close, 
-                  action: 'SELL', 
-                  amount: sellProceeds,
-                  shares: sharesToSell
-                });
-                break;
+            if (isTriggered) {
+              if (rule.action === 'BUY' && cash >= dayData.close) {
+                const buyBudget = Math.min(rule.amount, cash);
+                // 考虑手续费后的可买入数量
+                const boughtShares = Math.floor(buyBudget / (dayData.close * (1 + tradingFee)));
+                if (boughtShares > 0) {
+                  const cost = boughtShares * dayData.close;
+                  const fee = cost * tradingFee;
+                  shares += boughtShares;
+                  cash = Math.round((cash - cost - fee) * 100) / 100;
+                  totalCost += cost;
+                  trades.push({ 
+                    date: dayData.date, 
+                    price: dayData.close, 
+                    action: 'BUY', 
+                    amount: cost + fee,
+                    shares: boughtShares
+                  });
+                  break;
+                }
+              } else if (rule.action === 'SELL' && shares > 0) {
+                const sharesToSell = Math.min(shares, Math.floor(rule.amount / dayData.close));
+                if (sharesToSell > 0) {
+                  const sellProceeds = sharesToSell * dayData.close;
+                  const fee = sellProceeds * tradingFee;
+                  const costOfSoldShares = (totalCost / shares) * sharesToSell;
+                  cash = Math.round((cash + sellProceeds - fee) * 100) / 100;
+                  shares -= sharesToSell;
+                  totalCost -= costOfSoldShares;
+                  trades.push({ 
+                    date: dayData.date, 
+                    price: dayData.close, 
+                    action: 'SELL', 
+                    amount: sellProceeds - fee,
+                    shares: sharesToSell
+                  });
+                  break;
+                }
               }
             }
           }
         }
-      }
-      
-      const finalTrades = trades;
-      setTradePoints(finalTrades);
-      
-      // Merge trade signals into chartData for perfect alignment
-      const mergedData = currentData.map(day => {
-        const dayTrades = finalTrades.filter(t => t.date === day.date);
-        return {
-          ...day,
-          buyPrice: dayTrades.find(t => t.action === 'BUY')?.price || null,
-          sellPrice: dayTrades.find(t => t.action === 'SELL')?.price || null,
-        };
-      });
-      setChartData(mergedData);
+        
+        const finalValue = Math.round((cash + (shares * endPrice)) * 100) / 100;
+        const strategyReturn = ((finalValue - initialCapital) / initialCapital) * 100;
 
-      console.log("Simulation complete. Trade points count:", finalTrades.length);
-      
-      const finalValue = cash + (shares * endPrice);
-      const strategyReturn = ((finalValue - initialCapital) / initialCapital) * 100;
+        setTradePoints(trades);
+        setChartData(currentData.map(day => {
+          const dayTrades = trades.filter(t => t.date === day.date);
+          return {
+            ...day,
+            buyPrice: dayTrades.find(t => t.action === 'BUY')?.price || null,
+            sellPrice: dayTrades.find(t => t.action === 'SELL')?.price || null,
+          };
+        }));
 
-      setResults({
-        buyAndHoldValue,
-        buyAndHoldReturn,
-        finalValue,
-        strategyReturn,
-        finalCash: cash,
-        finalPositionValue: shares * endPrice
-      });
+        setResults({
+          buyAndHoldValue,
+          buyAndHoldReturn,
+          finalValue,
+          strategyReturn,
+          finalCash: cash,
+          finalPositionValue: shares * endPrice,
+          maxDrawdown: maxDrawdown * 100,
+          winRate: trades.length > 0 ? (trades.filter((t, idx) => {
+            if (t.action === 'SELL') {
+              const buy = trades.slice(0, idx).reverse().find(pt => pt.action === 'BUY');
+              return buy && t.price > buy.price;
+            }
+            return false;
+          }).length / (trades.filter(t => t.action === 'SELL').length || 1)) * 100 : 0
+        });
     } catch (error: any) {
       console.error("Simulation failed", error);
       alert(`模拟运行出错: ${error.message || "未知错误"}`);
@@ -373,11 +401,42 @@ export const SimulationPage = () => {
     }
   };
 
+  const runDiagnosis = async () => {
+    if (!results) return;
+    setIsDiagnosing(true);
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const prompt = `你是一个冷酷的量化交易风控专家“贾维斯”。请对以下回测结果进行深度批判和建议。
+      
+      回测数据:
+      - 股票: ${stockName} (${symbol})
+      - 策略收益率: ${results.strategyReturn.toFixed(2)}%
+      - 基准收益率: ${results.buyAndHoldReturn.toFixed(2)}%
+      - 最大回撤: ${results.maxDrawdown.toFixed(2)}%
+      - 胜率: ${results.winRate.toFixed(2)}%
+      - 交易次数: ${tradePoints.length}
+      
+      规则集:
+      ${JSON.stringify(rules.map(r => ({ name: r.name, action: r.action, conditions: r.conditions })), null, 2)}
+      
+      请从风险控制、择时精准度、过度交易、指标冲突等专业维度给出评价，并提供1-2条具体的改进方案。语言风格要专业、冷峻、直接。`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt
+      });
+      setDiagnosis(response.text || "诊断失败");
+    } catch (error) {
+      console.error("Diagnosis failed", error);
+      setDiagnosis("无法连接至诊断服务器...");
+    } finally {
+      setIsDiagnosing(false);
+    }
+  };
+
   return (
     <div className="p-8 space-y-6">
-      <div className="bg-yellow-100 p-2 text-[10px] text-yellow-800 rounded mb-4">
-        Debug: SimulationPage Rendered | Symbol: {symbol} | Data Points: {chartData.length}
-      </div>
+
       <h1 className="text-2xl font-bold">模拟股票交易</h1>
       
       <div className="grid grid-cols-1 gap-6">
@@ -413,6 +472,19 @@ export const SimulationPage = () => {
             <div>
               <label className="text-xs font-bold text-slate-500 uppercase block mb-1">结束日期</label>
               <input type="date" className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-slate-500 uppercase block mb-1">交易规费 (单边)</label>
+              <div className="relative">
+                <input 
+                  type="number" 
+                  step="0.0001"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                  value={tradingFee}
+                  onChange={(e) => setTradingFee(Number(e.target.value))}
+                />
+                <span className="absolute right-3 top-2 text-[10px] text-slate-400">比例</span>
+              </div>
             </div>
           </div>
 
@@ -564,6 +636,22 @@ export const SimulationPage = () => {
         </section>
 
         <section className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-lg font-bold text-slate-800">策略表现概览</h2>
+            {results && (
+              <div className="flex gap-4">
+                <div className="bg-red-50 px-3 py-1 rounded-lg">
+                  <div className="text-[10px] text-red-400 font-bold uppercase">最大回撤</div>
+                  <div className="text-sm font-mono font-bold text-red-600">-{results.maxDrawdown.toFixed(2)}%</div>
+                </div>
+                <div className="bg-blue-50 px-3 py-1 rounded-lg">
+                  <div className="text-[10px] text-blue-400 font-bold uppercase">胜率 (卖出盈利)</div>
+                  <div className="text-sm font-mono font-bold text-blue-600">{results.winRate.toFixed(1)}%</div>
+                </div>
+              </div>
+            )}
+          </div>
+
           <ResponsiveContainer width="100%" height={400}>
             <ComposedChart 
               key={`chart-${chartData.length}-${tradePoints.length}`}
@@ -626,6 +714,28 @@ export const SimulationPage = () => {
               </div>
 
               <div className="mt-8 border-t pt-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider">AI 策略诊断 & 风险评估</h3>
+                  <button 
+                    onClick={runDiagnosis}
+                    disabled={isDiagnosing}
+                    className="flex items-center gap-2 px-4 py-1.5 bg-purple-600 text-white rounded-lg text-xs font-bold hover:bg-purple-700 disabled:opacity-50"
+                  >
+                    {isDiagnosing ? "分析中..." : <><Brain size={14} /> 获取专家诊断</>}
+                  </button>
+                </div>
+                
+                {diagnosis && (
+                  <div className="bg-slate-900 text-slate-300 p-5 rounded-xl border border-slate-700 mb-6 font-mono text-xs leading-relaxed">
+                    <div className="flex items-center gap-2 text-purple-400 mb-3 font-bold border-b border-slate-800 pb-2">
+                       <Brain size={16} /> JARVIS SYSTEM DIAGNOSIS
+                    </div>
+                    {diagnosis.split('\n').map((line, i) => (
+                      <p key={i} className="mb-2">{line}</p>
+                    ))}
+                  </div>
+                )}
+
                 <h3 className="text-sm font-bold text-slate-700 mb-4 uppercase tracking-wider">交易日志 (文本输出)</h3>
                 <div className="bg-slate-50 rounded-xl p-4 max-h-60 overflow-y-auto border border-slate-100">
                   {tradePoints.length > 0 ? (
