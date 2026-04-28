@@ -113,6 +113,7 @@ export default function App() {
 
 function AppContent() {
   const [user, setUser] = useState<User | null>(null);
+  const [isGuest, setIsGuest] = useState(false);
   const [currentPage, setCurrentPage] = useState<'dashboard' | 'simulation'>('dashboard');
   const [loading, setLoading] = useState(true);
   const [balance, setBalance] = useState<number>(100000);
@@ -150,13 +151,14 @@ function AppContent() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
+      if (u) setIsGuest(false);
       setLoading(false);
     });
     return () => unsubscribe();
   }, []);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || isGuest) return;
 
     const userDocRef = doc(db, 'users', user.uid);
     const unsubProfile = onSnapshot(userDocRef, (docSnap) => {
@@ -330,7 +332,12 @@ function AppContent() {
   };
 
   const updateProfile = async (newBalance?: number, newPrinciples?: string, newAssistantName?: string) => {
-    if (!user) return;
+    if (!user || isGuest) {
+      if (newBalance !== undefined) setBalance(newBalance);
+      if (newPrinciples !== undefined) setPrinciples(newPrinciples);
+      if (newAssistantName !== undefined) setAssistantName(newAssistantName);
+      return;
+    }
     const b = newBalance !== undefined ? newBalance : balanceRef.current;
     const p = newPrinciples !== undefined ? newPrinciples : principlesRef.current;
     const a = newAssistantName !== undefined ? newAssistantName : assistantName;
@@ -344,7 +351,7 @@ function AppContent() {
   };
 
   const updateHoldingsPrices = async () => {
-    if (!user || holdings.length === 0) return;
+    if ((!user && !isGuest) || holdings.length === 0) return;
     setIsUpdatingHoldings(true);
     try {
       for (const holding of holdings) {
@@ -363,7 +370,7 @@ function AppContent() {
   };
 
   const addHolding = async (holdingData?: { symbol: string, name: string, quantity: number, costPrice: number, currentPrice: number }) => {
-    if (!user) return;
+    if (!user && !isGuest) return;
     
     let finalData = holdingData;
     
@@ -379,19 +386,33 @@ function AppContent() {
       };
     }
 
-    await addDoc(collection(db, 'users', user.uid, 'holdings'), {
+    if (isGuest) {
+      const newHolding = { ...finalData, id: Math.random().toString(36).substr(2, 9), updatedAt: new Date().toISOString() };
+      setHoldings(prev => [...prev, newHolding]);
+      return;
+    }
+
+    await addDoc(collection(db, 'users', user!.uid, 'holdings'), {
       ...finalData,
-      uid: user.uid,
+      uid: user!.uid,
       updatedAt: Timestamp.now()
     });
   };
 
   const removeHolding = async (id: string) => {
+    if (isGuest) {
+      setHoldings(prev => prev.filter(h => h.id !== id));
+      return;
+    }
     if (!user) return;
     await deleteDoc(doc(db, 'users', user.uid, 'holdings', id));
   };
 
   const updateHolding = async (id: string, updates: Partial<any>) => {
+    if (isGuest) {
+      setHoldings(prev => prev.map(h => h.id === id ? { ...h, ...updates } : h));
+      return;
+    }
     if (!user) return;
     await updateDoc(doc(db, 'users', user.uid, 'holdings', id), {
       ...updates,
@@ -401,35 +422,67 @@ function AppContent() {
 
   if (loading) return <div className="flex items-center justify-center h-screen">加载中...</div>;
 
-  if (!user) {
+  if (!user && !isGuest) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-slate-900 text-white p-4">
+      <div className="flex flex-col items-center justify-center min-h-screen bg-slate-900 text-white p-4">
         <div className="absolute top-4 left-4 bg-yellow-100/20 p-1 text-[10px] text-yellow-200 rounded">
-          Debug: Login Screen Rendered | Loading: {loading ? "Yes" : "No"}
+          Debug: Login Screen | Loading: {loading ? "Yes" : "No"}
         </div>
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="max-w-md text-center space-y-8"
+          className="max-w-md w-full text-center space-y-6"
         >
-          <div className="bg-blue-600 p-4 rounded-2xl inline-block mb-4">
-            <TrendingUp size={48} />
+          <div className="bg-blue-600 p-6 rounded-3xl inline-block mb-2 shadow-xl shadow-blue-500/20">
+            <TrendingUp size={48} className="text-white" />
           </div>
-          <h1 className="text-4xl font-bold tracking-tight">智能股票交易助手</h1>
-          <p className="text-slate-400 text-lg">
-            连接大模型，获取专业技术指标分析与个性化投资建议。
-          </p>
-          <button 
-            onClick={handleLogin}
-            className="flex items-center justify-center gap-2 w-full bg-white text-slate-900 font-semibold py-4 rounded-xl hover:bg-slate-100 transition-colors"
-          >
-            <LogIn size={20} />
-            使用 Google 账号登录
-          </button>
+          <div className="space-y-2">
+            <h1 className="text-4xl font-black tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">智能交易助手</h1>
+            <p className="text-slate-400 text-lg font-medium">
+              无需账号，即刻开启专业级模拟风控
+            </p>
+          </div>
+          
+          <div className="space-y-3 pt-4">
+            <button 
+              onClick={handleLogin}
+              className="group flex items-center justify-center gap-3 w-full bg-white text-slate-900 font-bold py-4 rounded-2xl hover:bg-slate-100 transition-all active:scale-95 shadow-lg"
+            >
+              <LogIn size={20} className="group-hover:rotate-12 transition-transform" />
+              使用 Google 账号登录
+            </button>
+            
+            <div className="relative py-2">
+              <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-700"></div></div>
+              <div className="relative flex justify-center text-xs uppercase"><span className="bg-slate-900 px-2 text-slate-500">或者</span></div>
+            </div>
+
+            <button 
+              onClick={() => setIsGuest(true)}
+              className="flex items-center justify-center gap-2 w-full bg-slate-800 text-slate-200 font-bold py-4 rounded-2xl border border-slate-700 hover:bg-slate-700 hover:border-slate-600 transition-all active:scale-95 shadow-md"
+            >
+              <RotateCcw size={20} />
+              直接免登录使用 (体验模式)
+            </button>
+          </div>
+
+          <div className="pt-8 grid grid-cols-2 gap-4">
+            <div className="bg-slate-800/50 p-4 rounded-2xl border border-slate-700/50">
+              <div className="text-blue-400 font-bold text-sm mb-1">专业指标</div>
+              <div className="text-[10px] text-slate-500">MACD, KDJ, RSI 全支持</div>
+            </div>
+            <div className="bg-slate-800/50 p-4 rounded-2xl border border-slate-700/50">
+              <div className="text-purple-400 font-bold text-sm mb-1">AI 顾问</div>
+              <div className="text-[10px] text-slate-500">贾维斯级实时策略分析</div>
+            </div>
+          </div>
         </motion.div>
       </div>
     );
   }
+
+  const userDisplayName = isGuest ? "访客用户" : (user?.displayName || user?.email?.split('@')[0] || "交易员");
+  const userPhoto = isGuest ? null : user?.photoURL;
 
   return (
     <div className="min-h-screen pb-20">
@@ -437,6 +490,11 @@ function AppContent() {
         Debug: AppContent Rendered | Page: {currentPage} | User: {user?.email}
       </div>
       <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
+        {isGuest && (
+          <div className="bg-blue-600 text-white text-[10px] py-1 text-center font-bold">
+            当前处于「免登录体验模式」：数据仅保存在浏览器缓存中，登录后可同步云端。
+          </div>
+        )}
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2 text-blue-600 font-bold text-xl">
@@ -458,10 +516,29 @@ function AppContent() {
           </div>
           <div className="flex items-center gap-4">
             <div className="text-right hidden sm:block">
-              <div className="text-xs text-slate-500 uppercase font-semibold">账户余额</div>
+              <div className="text-xs text-slate-500 uppercase font-semibold">账户余额 ({isGuest ? "虚拟" : "实盘"})</div>
               <div className="font-mono font-bold text-slate-900">{formatCurrency(balance)}</div>
             </div>
-            <img src={user?.photoURL || ""} alt="avatar" className="w-10 h-10 rounded-full border border-slate-200" />
+            <div className="flex items-center gap-2">
+              <div className="text-right hidden md:block">
+                <div className="text-[10px] text-slate-400 font-bold">{userDisplayName}</div>
+              </div>
+              {userPhoto ? (
+                <img src={userPhoto} alt="avatar" className="w-10 h-10 rounded-full border border-slate-200" />
+              ) : (
+                <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-500">
+                  <LogIn size={20} />
+                </div>
+              )}
+              {isGuest && (
+                <button 
+                  onClick={handleLogin}
+                  className="bg-blue-600 text-white text-[10px] px-2 py-1 rounded font-bold hover:bg-blue-700"
+                >
+                  去登录
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </header>
