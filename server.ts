@@ -20,17 +20,36 @@ async function startServer() {
       const startDate = req.query.startDate || '';
       const endDate = req.query.endDate || '';
       
-      // 1. Try to resolve name to symbol if it's not a code
-      if (!/^(sh|sz|bj)?\d{6}$/i.test(symbol)) {
+      // Popular stock mapping for reliability
+      const commonMapping: Record<string, string> = {
+        "贵州茅台": "sh600519",
+        "隆基绿能": "sh601012",
+        "宁德时代": "sz300750",
+        "招商银行": "sh600036",
+        "中国平安": "sh601318",
+        "腾讯控股": "hk00700",
+        "浦发银行": "sh600000",
+        "600519": "sh600519",
+        "601012": "sh601012",
+        "300750": "sz300750",
+        "600036": "sh600036",
+        "601318": "sh601318",
+        "00700": "hk00700"
+      };
+
+      if (commonMapping[input]) {
+        symbol = commonMapping[input];
+      } else if (!/^(sh|sz|bj|hk)?\d{5,6}$/i.test(symbol)) {
         try {
           // Try Sina Suggest API first as it's very reliable for name-to-code
           const sinaRes = await axios.get(`https://suggest3.sinajs.cn/suggest/type=&key=${encodeURIComponent(input)}`, { 
-            timeout: 3000,
-            responseType: 'arraybuffer'
+            timeout: 5000,
+            responseType: 'arraybuffer',
+            headers: { 'Referer': 'https://finance.sina.com.cn/' }
           });
           const decoder = new TextDecoder('gbk');
           const sinaData = decoder.decode(sinaRes.data);
-          // Format: var suggestdata_1712910000000="隆基绿能,11,601012,1,隆基绿能,,隆基绿能,99";
+          
           const sinaMatch = sinaData.match(/="(.+?)"/);
           if (sinaMatch && sinaMatch[1]) {
             const firstSina = sinaMatch[1].split(";")[0];
@@ -38,10 +57,11 @@ async function startServer() {
             if (sParts.length >= 4) {
               const code = sParts[2];
               const type = sParts[1];
-              // Sina types: 11=sh, 31=sz, 41=bj
+              // Sina types: 11=sh, 31=sz, 41=bj, 71=hk
               let prefix = "sh";
               if (type === "31") prefix = "sz";
               else if (type === "41") prefix = "bj";
+              else if (type === "71") prefix = "hk";
               else if (code.startsWith("6")) prefix = "sh";
               else if (code.startsWith("0") || code.startsWith("3")) prefix = "sz";
               symbol = prefix + code;
@@ -49,9 +69,9 @@ async function startServer() {
           }
           
           // Fallback to Tencent Smartbox if Sina didn't find it
-          if (!/^(sh|sz|bj)?\d{6}$/i.test(symbol)) {
+          if (!/^(sh|sz|bj|hk)?\d{5,6}$/i.test(symbol)) {
             const searchRes = await axios.get(`https://smartbox.gtimg.cn/s3/?q=${encodeURIComponent(input)}&t=all`, { 
-              timeout: 3000,
+              timeout: 5000,
               headers: { 'Referer': 'https://gu.qq.com/' }
             });
             const searchData = searchRes.data;
@@ -69,7 +89,7 @@ async function startServer() {
         }
       }
 
-      // 2. Format 6-digit code to sh/sz
+      // 2. Format 6-digit code to sh/sz if prefix is missing
       if (/^\d{6}$/.test(symbol)) {
         if (symbol.startsWith("6")) symbol = "sh" + symbol;
         else if (symbol.startsWith("0") || symbol.startsWith("3")) symbol = "sz" + symbol;
@@ -77,7 +97,7 @@ async function startServer() {
 
       // Use Tencent Finance API for real-time snapshot
       const response = await axios.get(`http://qt.gtimg.cn/q=${symbol}`, {
-        timeout: 5000,
+        timeout: 8000,
         responseType: 'arraybuffer'
       });
       
@@ -85,17 +105,17 @@ async function startServer() {
       const dataStr = decoder.decode(response.data);
       
       if (dataStr.includes("pv_none")) {
-        return res.status(404).json({ error: "股票代码不存在，请检查后重试。" });
+        return res.status(404).json({ error: `股票代码 [${symbol}] 不存在，请检查后重试。`, debug: { input, resolvedSymbol: symbol } });
       }
 
       const match = dataStr.match(/="(.+)"/);
       if (!match || !match[1]) {
-        return res.status(404).json({ error: "接口响应异常，请稍后再试。" });
+        return res.status(404).json({ error: "接口响应异常，请稍后再试。", debug: { dataStr } });
       }
 
       const parts = match[1].split("~");
       if (parts.length < 10) {
-        return res.status(404).json({ error: "获取到的数据格式不完整。" });
+        return res.status(404).json({ error: "获取到的数据格式不完整。", debug: { partsCount: parts.length } });
       }
 
       const name = parts[1];

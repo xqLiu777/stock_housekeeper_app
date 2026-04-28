@@ -91,19 +91,37 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
               <div className="bg-blue-100 p-2 rounded-lg">
                 <BarChart3 className="text-blue-600" size={20} />
               </div>
-              <div className="relative group">
-                <input 
-                  type="text"
-                  placeholder="输入股票名称或代码..."
-                  className="text-xl font-bold text-slate-900 bg-transparent border-b-2 border-transparent hover:border-slate-200 focus:border-blue-500 outline-none transition-all w-32 sm:w-40"
-                  value={stockName || searchSymbol}
-                  onChange={(e) => {
-                    setSearchSymbol(e.target.value);
-                    setStockName("");
-                  }}
-                  onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                />
-                <Search size={14} className="absolute right-0 top-1/2 -translate-y-1/2 text-slate-300 pointer-events-none group-hover:text-slate-400" />
+              <div className="relative group flex flex-col">
+                <div className="relative">
+                  <input 
+                    type="text"
+                    placeholder="输入股票名称或代码..."
+                    className="text-sm font-bold text-slate-900 bg-transparent border-b-2 border-transparent hover:border-slate-200 focus:border-blue-500 outline-none transition-all w-36 sm:w-48 placeholder:text-slate-400"
+                    value={stockName || searchSymbol}
+                    onChange={(e) => {
+                      setSearchSymbol(e.target.value);
+                      setStockName("");
+                    }}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                  />
+                  <Search size={14} className="absolute right-0 top-1/2 -translate-y-1/2 text-slate-300 pointer-events-none group-hover:text-slate-400" />
+                </div>
+                <div className="flex gap-2 mt-1">
+                  {['贵州茅台', '隆基绿能', '宁德时代'].map(name => (
+                    <button 
+                      key={name}
+                      onClick={() => {
+                        setSearchSymbol(name);
+                        setStockName("");
+                        // Trigger search after state update
+                        setTimeout(() => handleSearch(name), 0);
+                      }}
+                      className="text-[10px] text-blue-500 hover:text-blue-700 hover:underline transition-color"
+                    >
+                      {name}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
             {stockName && (
@@ -214,15 +232,15 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
                     <Tooltip 
                       contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', fontSize: '12px' }}
                     />
-                    {indicators && (
+                    {currentStock.length > 0 && currentStock[0].boll && (
                       <>
-                        <Line type="monotone" dataKey={() => indicators.boll.upper} stroke="#94a3b8" strokeDasharray="5 5" dot={false} strokeWidth={1} name="BOLL UP" />
-                        <Line type="monotone" dataKey={() => indicators.boll.mid} stroke="#94a3b8" dot={false} strokeWidth={1} name="BOLL MID" />
-                        <Line type="monotone" dataKey={() => indicators.boll.lower} stroke="#94a3b8" strokeDasharray="5 5" dot={false} strokeWidth={1} name="BOLL LOW" />
+                        <Line type="monotone" dataKey="boll.upper" stroke="#94a3b8" strokeDasharray="5 5" dot={false} strokeWidth={1} name="BOLL UP" />
+                        <Line type="monotone" dataKey="boll.mid" stroke="#94a3b8" dot={false} strokeWidth={1} name="BOLL MID" />
+                        <Line type="monotone" dataKey="boll.lower" stroke="#94a3b8" strokeDasharray="5 5" dot={false} strokeWidth={1} name="BOLL LOW" />
                         
-                        <Line type="monotone" dataKey={() => indicators.ma.ma5} stroke="#3b82f6" dot={false} strokeWidth={1} name="MA5" />
-                        <Line type="monotone" dataKey={() => indicators.ma.ma10} stroke="#f59e0b" dot={false} strokeWidth={1} name="MA10" />
-                        <Line type="monotone" dataKey={() => indicators.ma.ma20} stroke="#ef4444" dot={false} strokeWidth={1} name="MA20" />
+                        <Line type="monotone" dataKey="ma.ma5" stroke="#3b82f6" dot={false} strokeWidth={1} name="MA5" />
+                        <Line type="monotone" dataKey="ma.ma10" stroke="#f59e0b" dot={false} strokeWidth={1} name="MA10" />
+                        <Line type="monotone" dataKey="ma.ma20" stroke="#ef4444" dot={false} strokeWidth={1} name="MA20" />
                       </>
                     )}
                     <Bar dataKey={(d: any) => [d.open, d.close]} shape={<CandleStick />} />

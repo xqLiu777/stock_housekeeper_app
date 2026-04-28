@@ -252,9 +252,17 @@ function AppContent() {
 
     setCurrentStock(filtered);
     
-    // Calculate indicators for the full history then slice for the visible window
     const allIndicators = calculateHistoryIndicators(history);
-    setIndicatorHistory(allIndicators.slice(startIdx, endIdx));
+    const slicedIndicators = allIndicators.slice(startIdx, endIdx);
+    
+    // Merge price data with indicators for the chart
+    const combined = filtered.map((d, i) => ({
+      ...d,
+      ...slicedIndicators[i]
+    }));
+    
+    setCurrentStock(combined);
+    setIndicatorHistory(slicedIndicators);
     
     const currentIndicators = calculateIndicators(history.slice(0, endIdx));
     setIndicators(currentIndicators);
